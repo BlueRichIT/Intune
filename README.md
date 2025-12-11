@@ -1,2 +1,0 @@
-# Intune
-Intune Project Script

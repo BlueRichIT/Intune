@@ -1,0 +1,116 @@
+Microsoft Graph PowerShell Script — Disabled Users Device Group Cleanup
+This document explains, step-by-step, a PowerShell script that connects to Microsoft Graph, identifies disabled users within a specified Azure AD group, enumerates their registered devices, and removes those devices from non-dynamic Azure AD groups when the device name matches specific prefixes.
+Prerequisites
+•	PowerShell 7.x or Windows PowerShell 5.1.
+•	Microsoft Graph PowerShell SDK installed: Install-Module Microsoft.Graph -Scope CurrentUser.
+•	An Azure AD app registration (client ID and client secret) with appropriate Graph application permissions.
+•	Tenant ID and target Azure AD group ID.
+Required Microsoft Graph permissions (Application)
+•	Directory.Read.All — read directory data.
+•	Group.Read.All and Group.ReadWrite.All — read and modify group membership.
+•	Device.Read.All — read device information.
+•	User.Read.All — read user profiles.
+Configuration Parameters
+Replace the placeholder values in the script:
+•	ClientId — your app registration client ID.
+•	TenantId — your Azure AD tenant ID.
+•	ClientSecret — the client secret value (store securely).
+•	groupId — the GUID of the Azure AD group to scan for disabled users.
+•	Device name prefixes — replace "XXX*" with your real hostname prefixes (e.g., "BLRxxx*", "USExxx").
+Security Recommendations
+•	Avoid embedding secrets directly in scripts. Use environment variables, Azure Key Vault, or SecureString in local secret store.
+•	Grant the minimum permissions required and use admin consent.
+•	Run the script using least-privileged identities and log actions.
+
+Full Script running through Powershell or Azure Automation account...
+# Parameters for Graph API authentication
+$ClientId = "xxxxxxxxxxxxxxxx"
+$TenantId = "xxxxxxxxxxxxxxxx"
+$ClientSecret ='xxxxxxxxxxxxxxxxx'
+
+# Convert client secret to secure string for credential
+$secureClientSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
+$credential = New-Object System.Management.Automation.PSCredential($ClientId, $secureClientSecret)
+
+# Connect to Microsoft Graph with the app credentials
+Connect-MgGraph -TenantId $TenantId -Credential $credential
+
+# Specify the Group ID directly (replace with the actual Group ID)
+$groupId = "xxxxxxxxxxxxxxx"  # Replace this with the actual group ID
+
+# Retrieve all members of the specified group
+$groupMembers = Get-MgGroupMember -GroupId $groupId -All
+
+# Initialize a list to hold disabled users
+$disabledUsers = @()
+
+# Loop through each group member to check if they are disabled
+foreach ($member in $groupMembers) {
+    # Fetch the full user details with specific properties
+    $user = Get-MgUser -UserId $member.Id -Property "id,displayName,accountEnabled"
+
+    # Check if the user is disabled
+    if ($null -ne $user.accountEnabled -and $user.accountEnabled -eq $false) {
+        $disabledUsers += $user
+    } else {
+        Write-Output "User $($user.DisplayName) ($($user.Id)) does not have accountEnabled property or is enabled."
+    }
+}
+
+# Check if we found any disabled users
+if ($disabledUsers.Count -eq 0) {
+    Write-Output "No disabled users found in group $groupId."
+    Disconnect-MgGraph
+    return
+}
+
+# Process each disabled user in the group
+foreach ($user in $disabledUsers) {
+    Write-Output "Processing disabled user: $($user.DisplayName) ($($user.Id))"
+
+    # Retrieve the devices associated with this user
+    $userDevices = Get-MgUserRegisteredDevice -UserId $user.Id -All
+
+    # Output details of each device for debugging
+    foreach ($device in $userDevices) {
+        Write-Output "Device: $($device.DisplayName) ($($device.Id))"
+    }
+
+    # Loop through each device associated with the disabled user
+    foreach ($device in $userDevices) {
+        # Retrieve the device details to get the hostname
+        $deviceDetails = Get-MgDevice -DeviceId $device.Id -Property "displayName"
+
+        # Check if the device hostname starts with "UKLTH" or "INLTH"
+        if ($deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*") {
+            Write-Output "Processing device: $($deviceDetails.DisplayName) ($($device.Id))"
+
+            # Retrieve the groups that the device is a member of, excluding dynamic membership groups
+            $deviceGroups = Get-MgDeviceMemberOf -DeviceId $device.Id -All | Where-Object {
+                -not $_.groupTypes -or ($_.groupTypes -notcontains "DynamicMembership")
+            }
+
+            # Loop through each group and remove the device from the group
+            foreach ($group in $deviceGroups) {
+                if ($null -ne $group.Id -and $group.Id -ne "") {
+                    try {
+                        # Remove the device from the group
+                        Remove-MgGroupMemberByRef -GroupId $group.Id -DirectoryObjectId $device.Id -ErrorAction Stop
+                        Write-Output "Successfully removed device $($deviceDetails.DisplayName) from group $($group.Id)"
+                    } catch {
+                        Write-Output "Failed to remove device $($deviceDetails.DisplayName) from group $($group.Id): $($_.Exception.Message)"
+                    }
+                } else {
+                    Write-Output "Group ID for device $($deviceDetails.DisplayName) is null or empty."
+                }
+            }
+        } else {
+            Write-Output "Skipping device $($deviceDetails.DisplayName) as it does not start with XXX or XXX."
+        }
+    }
+}
+
+# Disconnect from Microsoft Graph
+Disconnect-MgGraph
+
+
