@@ -81,7 +81,7 @@ foreach ($user in $disabledUsers) {
         # Retrieve the device details to get the hostname
         $deviceDetails = Get-MgDevice -DeviceId $device.Id -Property "displayName"
 
-        # Check if the device hostname starts with "UKLTH" or "INLTH"
+        # Check if the device hostname starts with "xxxx" or "yyyy"
         if ($deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*" -or $deviceDetails.DisplayName -like "XXX*") {
             Write-Output "Processing device: $($deviceDetails.DisplayName) ($($device.Id))"
 
