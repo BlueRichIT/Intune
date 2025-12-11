@@ -2,7 +2,7 @@ Microsoft Graph PowerShell Script — Disabled Users Device Group Cleanup
 This document explains, step-by-step, a PowerShell script that connects to Microsoft Graph, identifies disabled users within a specified Azure AD group, enumerates their registered devices, and removes those devices from non-dynamic Azure AD groups when the device name matches specific prefixes.
 Prerequisites
 •	PowerShell 7.x or Windows PowerShell 5.1.
-•	Microsoft Graph PowerShell SDK installed: Install-Module Microsoft.Graph -Scope CurrentUser.
+•	Microsoft Graph PowerShell SDK installed: Install-Module Microsoft.Graph -Scope CurrentUser..
 •	An Azure AD app registration (client ID and client secret) with appropriate Graph application permissions.
 •	Tenant ID and target Azure AD group ID.
 Required Microsoft Graph permissions (Application)
