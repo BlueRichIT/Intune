@@ -1,17 +1,46 @@
 ﻿<#
 .SYNOPSIS
-  Sync a (static) Entra device group based on users in two (static) user groups.
+Author- BRIT IT Solutions
+Script Description — Sync Devices to a Static Entra ID Device Group from Two User Groups
+Name: Sync-DeviceGroupFromUserGroups.ps1
+Author: BRIT IT Solutions
+Purpose:
+This script synchronizes membership of a static Azure Entra ID device group so that it contains all devices registered to users who belong to either of two specified (static) user groups. It’s a practical workaround for scenarios where a “dynamic device group” cannot express “devices owned by users in group A or group B.” The script queries Microsoft Graph to compute the desired device set and then adds/removes devices in the target device group to match.
+⚠️ Note: Dynamic device membership rules in Entra ID cannot natively select devices based on user group membership. This script maintains a static device group to achieve that outcome.
+What the Script Does (High Level)
+Authentication
+Obtains an application (client credentials) token for Microsoft Graph using the provided Tenant ID, Client ID, and Client Secret.
+Collect Source Users
+Retrieves transitive members (users) of the two provided user groups and builds a unique set of user IDs (union of both groups).
+Resolve Devices per User
+For each user in the union set, pulls their registered devices and builds the desired device ID set.
+Read Current Target Group Membership
+Gets the current device members of the target device group.
+Delta Calculation & Apply Changes
+Add devices that are missing from the target group.
+Remove devices that are no longer desired in the target group.
+Prints a summary with Added/Removed counts.
 
-.REQUIREMENTS
-  Microsoft Graph app permissions (Application):
-    - Group.Read.All
-    - GroupMember.Read.All
-    - Directory.Read.All
-    - GroupMember.ReadWrite.All  (to add/remove members in target group)
-  Use client secret or certificate auth.
-
-.NOTES
-  Dynamic device group can't do this natively; this script maintains a static device group instead.
+Parameters
+-TenantId (String, Required)
+Your Azure AD/Entra tenant ID (GUID).
+-ClientId (String, Required)
+The App Registration (Enterprise App) Client ID that has Graph application permissions.
+-ClientSecret (String, Required)
+The client secret issued to the App Registration.
+-UserGroupId1 (String, Required)
+Object ID of the first user group (static) to consider.
+-UserGroupId2 (String, Required)
+Object ID of the second user group (static) to consider.
+-TargetDeviceGroupId (String, Required)
+Object ID of the device group (static) the script will keep in sync.
+Required Microsoft Graph Permissions (Application)
+Grant these application permissions to the App Registration and admin consent them:
+Group.Read.All
+GroupMember.Read.All
+Directory.Read.All
+GroupMember.ReadWrite.All (required to add/remove target group members)
+Authentication uses client credentials (client secret). Certificate-based auth can be substituted with minimal changes.
 #>
 
 param(
@@ -126,3 +155,4 @@ foreach ($did in $toRemove) {
 }
 
 Write-Host "DONE. Added=$($toAdd.Count) Removed=$($toRemove.Count)"
+
