@@ -1,0 +1,123 @@
+<#
+.SYNOPSIS
+
+This PowerShell script collects detailed information about local Administrators group membership on a Windows device. It is designed to be used with Microsoft Intune Proactive Remediations (as a Discovery script) but can also run standalone.
+The script outputs results in JSON, making it easy for Intune, SIEM tools, or log ingestion pipelines to consume.
+  Collect local Administrators members and output:
+    - Azure AD DeviceId
+    - Admin account name/type/SID
+    - Entra ObjectId (for AzureAD users/groups when resolvable)
+
+.USAGE
+  Deploy via Intune (Proactive Remediation = Discovery script) or regular script.
+  Output is JSON (easy to collect/log).
+
+.PERMISSIONS (only needed if you enable Graph resolve):
+  App permissions:
+    - User.Read.All
+    - Group.Read.All
+#>
+
+param(
+    [switch]$ResolveEntraIds,   # enable Graph lookup for AzureAD accounts
+    [string]$TenantId,
+    [string]$ClientId,
+    [string]$ClientSecret
+)
+
+$ErrorActionPreference = "SilentlyContinue"
+
+function Get-AzureAdDeviceId {
+    # Try dsregcmd first
+    $out = & dsregcmd /status 2>$null
+    if ($out) {
+        $line = ($out | Select-String -Pattern "DeviceId" | Select-Object -First 1).Line
+        if ($line -match "DeviceId\s*:\s*([0-9a-fA-F-]{36})") { return $Matches[1] }
+    }
+
+    # Fallback: CloudDomainJoin registry
+    try {
+        $joinInfo = Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Control\CloudDomainJoin\JoinInfo" -ErrorAction Stop | Select-Object -First 1
+        $p = Get-ItemProperty $joinInfo.PSPath
+        if ($p.DeviceId) { return $p.DeviceId }
+    } catch {}
+
+    return $null
+}
+
+function Get-GraphToken {
+    $body = @{
+        client_id     = $ClientId
+        client_secret = $ClientSecret
+        scope         = "https://graph.microsoft.com/.default"
+        grant_type    = "client_credentials"
+    }
+    (Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body $body).access_token
+}
+
+function Invoke-GraphGet($uri) {
+    $headers = @{ Authorization = "Bearer $script:Token" }
+    Invoke-RestMethod -Method GET -Uri $uri -Headers $headers
+}
+
+function Resolve-EntraObjectId {
+    param([string]$AzureAdName)
+
+    # AzureAD\user@domain.com  OR  AzureAD\Group Name
+    $name = $AzureAdName -replace '^AzureAD\\',''
+
+    # If it looks like UPN -> user lookup
+    if ($name -match '@') {
+        $upnEsc = $name.Replace("'","''")
+        $res = Invoke-GraphGet "https://graph.microsoft.com/v1.0/users?`$select=id,userPrincipalName&`$filter=userPrincipalName eq '$upnEsc'"
+        return $res.value[0].id
+    }
+
+    # Otherwise, try group by displayName (not perfect if duplicates exist)
+    $dnEsc = $name.Replace("'","''")
+    $res = Invoke-GraphGet "https://graph.microsoft.com/v1.0/groups?`$select=id,displayName&`$filter=displayName eq '$dnEsc'"
+    return $res.value[0].id
+}
+
+# ---- Main ----
+$deviceId = Get-AzureAdDeviceId
+$computer = $env:COMPUTERNAME
+$time     = (Get-Date).ToString("s")
+
+if ($ResolveEntraIds) {
+    if (-not ($TenantId -and $ClientId -and $ClientSecret)) {
+        throw "ResolveEntraIds enabled but TenantId/ClientId/ClientSecret not provided."
+    }
+    $script:Token = Get-GraphToken
+}
+
+$admins = @()
+try {
+    $members = Get-LocalGroupMember -Group "Administrators" -ErrorAction Stop
+} catch {
+    $members = @()
+}
+
+foreach ($m in $members) {
+    $memberName = [string]$m.Name
+    $sid        = [string]$m.SID
+    $type       = [string]$m.ObjectClass
+
+    $entraId = $null
+    if ($ResolveEntraIds -and $memberName -like "AzureAD\*") {
+        $entraId = Resolve-EntraObjectId -AzureAdName $memberName
+    }
+
+    $admins += [pscustomobject]@{
+        TimeStamp       = $time
+        ComputerName    = $computer
+        AzureAdDeviceId = $deviceId
+        MemberName      = $memberName
+        MemberSid       = $sid
+        MemberType      = $type
+        EntraObjectId   = $entraId
+    }
+}
+
+# Output JSON (good for Intune PR discovery output)
+$admins | ConvertTo-Json -Depth 5
